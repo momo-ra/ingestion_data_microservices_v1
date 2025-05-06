@@ -13,7 +13,7 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv('.env', override=True)
+load_dotenv('.env', override=True)  
 
 # Setup logger
 logger = setup_logger(__name__)
