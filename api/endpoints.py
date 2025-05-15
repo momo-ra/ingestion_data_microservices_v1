@@ -10,7 +10,7 @@ from services.monitoring_services import MonitoringService
 from datetime import datetime, timedelta
 import time
 from queries.subscription_queries import get_active_subscription_tasks
-from schemas.schema import NodeRequest, PollingRequest, TimeRangeRequest
+from schemas.schema import NodeRequest, PollingRequest, TimeRangeRequest, PollingResponse
 
 router = APIRouter()
 logger = setup_logger(__name__)
