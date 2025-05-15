@@ -1,6 +1,6 @@
 from database import async_session
 from sqlalchemy import text
-from schemas import TagSchema, TimeSeriesSchema, AlertSchema
+from schemas.schema import TagSchema, TimeSeriesSchema, AlertSchema
 from utils.log import setup_logger
 from datetime import datetime, timezone
 from models.models import Tag, TimeSeries, Alerts

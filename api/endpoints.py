@@ -1,6 +1,4 @@
-from fastapi import APIRouter, HTTPException, Path, Query
-from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+from fastapi import APIRouter, HTTPException, Path
 from services.opc_ua_services import get_opc_ua_client
 from services.polling_services import get_polling_service
 from services.subscription_services import get_subscription_service
@@ -12,28 +10,10 @@ from services.monitoring_services import MonitoringService
 from datetime import datetime, timedelta
 import time
 from queries.subscription_queries import get_active_subscription_tasks
+from schemas.schema import NodeRequest, PollingRequest, TimeRangeRequest
 
 router = APIRouter()
 logger = setup_logger(__name__)
-
-class NodeRequest(BaseModel):
-    node_id: str
-    
-class PollingRequest(BaseModel):
-    node_id: str
-    interval_seconds: int = 60
-
-class PollingResponse(BaseModel):
-    success: bool
-    message: str
-    node_id: str
-    interval_seconds: Optional[int] = None
-
-class TimeRangeRequest(BaseModel):
-    node_id: str
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    limit: Optional[int] = 100
 
 @router.get("/")
 async def root():
@@ -133,66 +113,38 @@ async def get_active_polling_nodes():
         logger.error(f"Error getting active polling nodes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/connection/check")
-async def check_connection():
-    """Check the connection to the OPC-UA server"""
+@router.get("/node/subscribe/active")
+async def get_active_subscriptions():
+    """Get all active subscriptions"""
     try:
-        client = get_opc_ua_client()
-        if client.connected:
-            return {"connected": True, "message": "Connected to OPC-UA server"}
-        else:
-            # Try to connect
-            success = await client.connect()
-            if success:
-                return {"connected": True, "message": "Successfully connected to OPC-UA server"}
-            else:
-                return {"connected": False, "message": "Failed to connect to OPC-UA server"}
+        tasks = await get_active_subscription_tasks()
+        return {"active_subscriptions": tasks}
     except Exception as e:
-        logger.error(f"Error checking connection: {e}")
-        return {"connected": False, "message": f"Error checking connection: {str(e)}"}
+        logger.error(f"Error getting active subscriptions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/health")
-async def get_health():
-    """Get the health status of the system"""
+@router.get("/node/subscribe/count")
+async def get_subscription_count():
+    """Get the count of active subscriptions in memory and database"""
     try:
-        monitoring_service = MonitoringService.get_instance()
-        health_status = monitoring_service.get_health_status()
-        return health_status
-    except Exception as e:
-        logger.error(f"Error getting health status: {e}")
+        # Get count from service instance
+        subscription_service = get_subscription_service()
+        memory_count = len(subscription_service.subscription_handles)
+        
+        # Get count from database
+        db_tasks = await get_active_subscription_tasks()
+        db_count = len(db_tasks)
+        
         return {
-            "status": "error",
-            "message": f"Error getting health status: {str(e)}"
+            "memory_count": memory_count,
+            "database_count": db_count,
+            "subscription_handles": list(subscription_service.subscription_handles.keys())
         }
+    except Exception as e:
+        logger.error(f"Error getting subscription count: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) 
+    
 
-@router.get("/health/detailed")
-async def get_detailed_health():
-    """Get detailed health status with metrics for all components"""
-    try:
-        monitoring_service = MonitoringService.get_instance()
-        health_status = monitoring_service.get_health_status()
-        
-        # Add additional system information
-        import psutil
-        import platform
-        
-        system_info = {
-            "cpu_percent": psutil.cpu_percent(),
-            "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent,
-            "python_version": platform.python_version(),
-            "platform": platform.platform(),
-            "process_uptime": time.time() - psutil.Process().create_time()
-        }
-        
-        health_status["system_info"] = system_info
-        return health_status
-    except Exception as e:
-        logger.error(f"Error getting detailed health status: {e}")
-        return {
-            "status": "error",
-            "message": f"Error getting detailed health status: {str(e)}"
-        }
 
 @router.post("/data/latest")
 async def get_latest_data(request: NodeRequest):
@@ -298,6 +250,8 @@ async def get_recent_data(hours: int = Path(..., ge=1, le=24)):
         logger.error(f"Error getting recent data: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
 @router.get("/metrics")
 async def metrics():
     """Get all metrics in JSON format"""
@@ -351,33 +305,63 @@ async def prometheus_metrics():
     
     return PlainTextResponse("\n".join(lines))
 
-@router.get("/node/subscribe/active")
-async def get_active_subscriptions():
-    """Get all active subscriptions"""
+@router.post("/connection/check")
+async def check_connection():
+    """Check the connection to the OPC-UA server"""
     try:
-        tasks = await get_active_subscription_tasks()
-        return {"active_subscriptions": tasks}
+        client = get_opc_ua_client()
+        if client.connected:
+            return {"connected": True, "message": "Connected to OPC-UA server"}
+        else:
+            # Try to connect
+            success = await client.connect()
+            if success:
+                return {"connected": True, "message": "Successfully connected to OPC-UA server"}
+            else:
+                return {"connected": False, "message": "Failed to connect to OPC-UA server"}
     except Exception as e:
-        logger.error(f"Error getting active subscriptions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error checking connection: {e}")
+        return {"connected": False, "message": f"Error checking connection: {str(e)}"}
 
-@router.get("/node/subscribe/count")
-async def get_subscription_count():
-    """Get the count of active subscriptions in memory and database"""
+@router.get("/health")
+async def get_health():
+    """Get the health status of the system"""
     try:
-        # Get count from service instance
-        subscription_service = get_subscription_service()
-        memory_count = len(subscription_service.subscription_handles)
-        
-        # Get count from database
-        db_tasks = await get_active_subscription_tasks()
-        db_count = len(db_tasks)
-        
-        return {
-            "memory_count": memory_count,
-            "database_count": db_count,
-            "subscription_handles": list(subscription_service.subscription_handles.keys())
-        }
+        monitoring_service = MonitoringService.get_instance()
+        health_status = monitoring_service.get_health_status()
+        return health_status
     except Exception as e:
-        logger.error(f"Error getting subscription count: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        logger.error(f"Error getting health status: {e}")
+        return {
+            "status": "error",
+            "message": f"Error getting health status: {str(e)}"
+        }
+
+@router.get("/health/detailed")
+async def get_detailed_health():
+    """Get detailed health status with metrics for all components"""
+    try:
+        monitoring_service = MonitoringService.get_instance()
+        health_status = monitoring_service.get_health_status()
+        
+        # Add additional system information
+        import psutil
+        import platform
+        
+        system_info = {
+            "cpu_percent": psutil.cpu_percent(),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage('/').percent,
+            "python_version": platform.python_version(),
+            "platform": platform.platform(),
+            "process_uptime": time.time() - psutil.Process().create_time()
+        }
+        
+        health_status["system_info"] = system_info
+        return health_status
+    except Exception as e:
+        logger.error(f"Error getting detailed health status: {e}")
+        return {
+            "status": "error",
+            "message": f"Error getting detailed health status: {str(e)}"
+        }

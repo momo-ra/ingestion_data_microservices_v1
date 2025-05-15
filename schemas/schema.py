@@ -1,6 +1,15 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TypeVar, Generic
+
+T = TypeVar('T')
+
+# General Class for Response
+class ResponseModel(BaseModel, Generic[T]):
+    """Base model for standardized API responses"""
+    status: str = Field(..., description="Status of Response(success/fail)")
+    data: Optional[T] = Field(None, description="Data should be return")
+    message: Optional[str] = Field(None, description="Error message when fail happened")
 
 class TagSchema(BaseModel):
     id: Optional[int] = None
@@ -22,6 +31,25 @@ class KafkaMessageSchema(BaseModel):
     description: str = Field(..., example="Tag Description")
     timestamp: datetime = Field(..., example="2023-03-10T12:00:00")
 
+#Request Schema
+class NodeRequest(BaseModel):
+    node_id: str
     
+class PollingRequest(BaseModel):
+    node_id: str
+    interval_seconds: int = 60
+
+class PollingResponse(BaseModel):
+    success: bool
+    message: str
+    node_id: str
+    interval_seconds: Optional[int] = None
+
+class TimeRangeRequest(BaseModel):
+    node_id: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    limit: Optional[int] = 100
+
     
     

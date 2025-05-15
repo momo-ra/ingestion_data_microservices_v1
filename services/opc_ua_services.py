@@ -7,28 +7,24 @@ from utils.log import setup_logger, with_async_correlation_id
 from utils.error_handling import handle_async_errors, ConnectionError
 from utils.metrics import async_time_metric, opcua_connection_attempts, opcua_requests_total, opcua_request_duration, opcua_connection_status
 from config.settings import settings
+from utils.singleton import Singleton
 
 load_dotenv()
 logger = setup_logger(__name__)
-
-# Singleton instance
-_opc_ua_client_instance = None
 
 def get_opc_ua_client():
     """Get the singleton instance of OpcUaClient"""
     return OpcUaClient.get_instance()
 
-class OpcUaClient:
-    @classmethod
-    def get_instance(cls):
-        """Get or create the singleton instance of OpcUaClient"""
-        global _opc_ua_client_instance
-        if _opc_ua_client_instance is None:
-            _opc_ua_client_instance = cls()
-        return _opc_ua_client_instance
-        
+class OpcUaClient(Singleton):
+    """OPC UA client with connection management and retries"""
+    
     def __init__(self):
         """Initialize the OPC UA client with settings from configuration"""
+        # Avoid re-initialization if already initialized
+        if hasattr(self, 'initialized') and self.initialized:
+            return
+            
         self.url = settings.opcua.url
         logger.info(f"Using OPC-UA server URL: {self.url}")
         
@@ -42,8 +38,15 @@ class OpcUaClient:
         self.connection_monitor_running = False
         self.connection_check_interval = settings.opcua.connection_check_interval
         
+        # Polling and subscription tracking
+        self.polling_tasks = {}
+        self.subscription_handles = {}
+        
         # Set initial connection status metric
         opcua_connection_status.set(0, {"url": self.url})
+        
+        # Mark as initialized
+        self.initialized = True
         
     @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Failed to connect to OPC-UA server")
@@ -167,10 +170,22 @@ class OpcUaClient:
             logger.info("Connection monitor is already running")
             return True
         
+        from utils.task_manager import TaskManager
+        
+        task_manager = TaskManager.get_instance()
         self.connection_monitor_running = True
-        self.connection_monitor_task = asyncio.create_task(self._connection_monitor_worker())
-        logger.info("Started connection monitor task")
-        return True
+        
+        # Start the connection monitor task using the task manager
+        success = await task_manager.start_task(
+            name="opcua_connection_monitor",
+            coro=self._connection_monitor_worker(),
+            restart_on_failure=True
+        )
+        
+        if success:
+            logger.info("Started connection monitor task")
+        
+        return success
 
     @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Error stopping connection monitor")
@@ -183,16 +198,21 @@ class OpcUaClient:
         Raises:
             ConnectionError: If error occurs stopping monitor
         """
-        if self.connection_monitor_task and not self.connection_monitor_task.done():
-            self.connection_monitor_running = False
-            self.connection_monitor_task.cancel()
-            try:
-                await self.connection_monitor_task
-            except asyncio.CancelledError:
-                pass
-            logger.info("Stopped connection monitor task")
+        if not self.connection_monitor_running:
             return True
-        return True
+            
+        from utils.task_manager import TaskManager
+        
+        task_manager = TaskManager.get_instance()
+        self.connection_monitor_running = False
+        
+        # Stop the connection monitor task using the task manager
+        success = await task_manager.stop_task("opcua_connection_monitor")
+        
+        if success:
+            logger.info("Stopped connection monitor task")
+            
+        return success
 
     async def _connection_monitor_worker(self) -> None:
         """Worker function for connection monitoring"""

@@ -1,6 +1,6 @@
 from database import async_session
 from sqlalchemy import insert
-from schemas import AlertSchema, TagSchema
+from schemas.schema import AlertSchema, TagSchema
 from datetime import datetime
 from utils.log import setup_logger
 

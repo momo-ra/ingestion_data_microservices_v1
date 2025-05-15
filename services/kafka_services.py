@@ -3,12 +3,12 @@ import os
 from dotenv import load_dotenv
 from utils.log import setup_logger
 import json
-from schemas import KafkaMessageSchema, TagSchema, TimeSeriesSchema
+from schemas.schema import KafkaMessageSchema, TagSchema, TimeSeriesSchema
 from datetime import datetime
 
 load_dotenv('.env', override=True)
 logger = setup_logger(__name__)
-
+print(os.getenv('KAFKA_BROKER'))
 
 class KafkaService:
     def __init__(self, kafka_broker:str):
@@ -43,6 +43,7 @@ class KafkaService:
         logger.success(f"Sending message to Kafka topic: {topic}")
         await self.producer.send(topic, message_bytes)
         await self.producer.flush()
+    
     def create_kafka_message_from_node_data(self, node_data) -> KafkaMessageSchema:
         """
         Create a KafkaMessageSchema from node_data dictionary
@@ -50,6 +51,7 @@ class KafkaService:
         """
         # Extract timestamp - preserve the original timestamp
         timestamp = node_data.get('timestamp')
+        print(timestamp)
         
         # Handle both datetime objects and string timestamps
         if isinstance(timestamp, str):

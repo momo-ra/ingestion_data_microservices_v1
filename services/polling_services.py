@@ -6,7 +6,7 @@ from queries.polling_queries import save_polling_task, deactivate_polling_task, 
 from queries.timeseries_queries import save_node_data_to_db
 from services.kafka_services import kafka_service
 from services.opc_ua_services import get_opc_ua_client
-from schemas import TagSchema, TimeSeriesSchema
+from schemas.schema import TagSchema, TimeSeriesSchema
 
 logger = setup_logger(__name__)
 

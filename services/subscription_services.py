@@ -6,7 +6,7 @@ from services.kafka_services import kafka_service
 from queries.timeseries_queries import save_node_data_to_db
 from queries.subscription_queries import save_subscription_task, deactivate_subscription_task, get_active_subscription_tasks, get_or_create_tag_id
 from datetime import datetime
-from schemas import TagSchema, TimeSeriesSchema
+from schemas.schema import TagSchema, TimeSeriesSchema
 
 logger = setup_logger(__name__)
 
