@@ -188,6 +188,7 @@ class PollingService:
             return False
     
     async def remove_polling_node(self, node_id):
+    
         """Remove a node from periodic polling"""
         try:
             if node_id in self.polling_tasks:
