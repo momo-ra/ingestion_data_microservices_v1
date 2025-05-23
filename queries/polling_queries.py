@@ -55,7 +55,8 @@ async def save_polling_task(node_id, interval_seconds):
                     time_interval=interval_seconds,
                     is_active=True,
                     last_polled=now,
-                    next_polled=next_poll
+                    next_polled=next_poll,
+                    created_at=now
                 )
                 session.add(new_task)
                 await session.commit()

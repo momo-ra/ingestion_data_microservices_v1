@@ -45,9 +45,10 @@ class polling_tasks(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     last_polled = Column(DateTime, nullable=True)
     next_polled = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     __table_args__ = (
         UniqueConstraint('tag_id', 'time_interval'),
-        
     )
 
 class subscription_tasks(Base):

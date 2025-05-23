@@ -154,6 +154,12 @@ class PollingService:
             if node_id in self.polling_tasks:
                 await self.remove_polling_node(node_id)
             
+            # Save polling task to database first
+            task_id = await save_polling_task(node_id, interval_seconds)
+            if not task_id:
+                logger.error(f"Failed to save polling task for node {node_id}")
+                return False
+            
             # Create job ID
             job_id = f"poll_{node_id}"
             
@@ -171,9 +177,6 @@ class PollingService:
                 "interval": interval_seconds,
                 "last_poll": time.time()
             }
-            
-            # Save polling task to database - pass node_id directly
-            await save_polling_task(node_id, interval_seconds)
             
             logger.info(f"Added polling for node {node_id} with interval {interval_seconds}s")
             
