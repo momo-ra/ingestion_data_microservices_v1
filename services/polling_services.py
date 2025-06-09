@@ -1,17 +1,19 @@
 import asyncio
 import time
+import threading
 from utils.log import setup_logger
 from services.scheduler_services import SchedulerService
 from queries.polling_queries import save_polling_task, deactivate_polling_task, update_polling_task_timestamp, get_active_polling_tasks, get_or_create_tag_id
 from queries.timeseries_queries import save_node_data_to_db
 from services.kafka_services import kafka_service
 from services.opc_ua_services import get_opc_ua_client
-from schemas.schema import TagSchema, TimeSeriesSchema
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 logger = setup_logger(__name__)
 
 # Singleton instance
 _polling_service_instance = None
+_polling_service_lock = threading.Lock()
 
 def get_polling_service():
     """Get the singleton instance of PollingService"""
@@ -22,8 +24,9 @@ class PollingService:
     def get_instance(cls):
         """Get or create the singleton instance of PollingService"""
         global _polling_service_instance
-        if _polling_service_instance is None:
-            _polling_service_instance = cls()
+        with _polling_service_lock:
+            if _polling_service_instance is None:
+                _polling_service_instance = cls()
         return _polling_service_instance
         
     def __init__(self):
@@ -36,6 +39,9 @@ class PollingService:
         
         # Get OPC UA client
         self.opc_client = get_opc_ua_client()
+        
+        self._last_restore_error_time = 0
+        self._last_poll_error_time = 0
         
     async def initialize(self):
         """Initialize the polling service and restore tasks"""
@@ -54,6 +60,7 @@ class PollingService:
         # No modification to node ID, use as is
         return node_id
         
+    @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
     async def restore_polling_tasks(self):
         """Restore polling tasks from database"""
         try:
@@ -92,9 +99,12 @@ class PollingService:
             
             logger.info(f"Restored {restored_count} polling tasks from database")
         except Exception as e:
-            logger.error(f"Error restoring polling tasks: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            now = time.time()
+            if now - self._last_restore_error_time > 60:
+                logger.error(f"Error restoring polling tasks: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                self._last_restore_error_time = now
             
     async def _fetch_and_save_node_data(self, node_id):
         """Fetch node value and save it to database"""
@@ -140,10 +150,17 @@ class PollingService:
             else:
                 logger.warning(f"Failed to get data for node {node_id}")
         except Exception as e:
-            logger.error(f"Error polling node {node_id}: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
+            now = time.time()
+            if now - self._last_poll_error_time > 60:
+                logger.error(f"Error polling node {node_id}: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                self._last_poll_error_time = now
     
+    async def polling_job_runner(node_id):
+        service = get_polling_service()
+        await service._fetch_and_save_node_data(node_id)
+
     async def add_polling_node(self, node_id, interval_seconds=60):
         """Add a node to periodic polling"""
         try:
@@ -163,10 +180,10 @@ class PollingService:
             # Create job ID
             job_id = f"poll_{node_id}"
             
-            # Add job to scheduler
+            # Add job to scheduler using the module-level function
             self.scheduler.add_job(
                 job_id=job_id,
-                func=self._fetch_and_save_node_data,
+                func=PollingService.polling_job_runner,
                 interval_seconds=interval_seconds,
                 args=[node_id]
             )

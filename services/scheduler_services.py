@@ -1,12 +1,6 @@
-"""
-Scheduler Service
-
-This module provides a centralized scheduler for managing scheduled tasks.
-"""
-
-import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from utils.log import setup_logger
 
 logger = setup_logger(__name__)
@@ -25,7 +19,10 @@ class SchedulerService:
     
     def __init__(self):
         """Initialize the scheduler service"""
-        self.scheduler = AsyncIOScheduler()
+        jobstores = {
+            'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')
+        }
+        self.scheduler = AsyncIOScheduler(jobstores=jobstores)
         self.jobs = {}
         
     def start(self):
