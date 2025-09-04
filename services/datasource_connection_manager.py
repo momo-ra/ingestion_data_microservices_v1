@@ -17,7 +17,7 @@ from models.plant_models import DataSource
 
 # Import datasources library
 try:
-    from datasources_lib import ConnectionPool, OpcUaConfig, DatabaseConfig
+    from datasources_lib import ConnectionPool, OpcUaConfig, DataSourceConfig
     DATASOURCES_AVAILABLE = True
 except ImportError:
     DATASOURCES_AVAILABLE = False
@@ -139,7 +139,7 @@ class DataSourceConnectionManager(Singleton):
             config_data.setdefault("port", 5432)
             config_data.setdefault("db_type", "postgresql" if datasource_type == "postgresql" else datasource_type)
             
-            return DatabaseConfig(**config_data)
+            return DataSourceConfig(**config_data)
         else:
             raise ConnectionError(f"Unsupported datasource type: {datasource_type}")
     

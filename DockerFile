@@ -2,21 +2,26 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the local datasources-lib package
-COPY ../libraries/datasources_lib /tmp/datasources_lib
+COPY libraries/datasources_lib /tmp/datasources_lib
 
 # Install the local package first
-RUN cd /tmp/datasources_lib && pip install --no-cache-dir .
+RUN cd /tmp/datasources_lib && pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir .
 
-# Copy requirements.txt and install other dependencies
-COPY requirements.txt .
+# Copy the application code first
+COPY ingestion_data_microservices/ .
 
 # Remove datasources-lib from requirements.txt temporarily and install other packages
 RUN grep -v "datasources-lib" requirements.txt > temp_requirements.txt && \
     pip install --no-cache-dir -r temp_requirements.txt
-
-# Copy the application code
-COPY . .
 
 EXPOSE 8007
 
