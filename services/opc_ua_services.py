@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import asyncio
 from asyncua import Client
 from typing import Dict, Any, Optional, List, Tuple
-from utils.log import setup_logger, with_async_correlation_id
+from utils.log import setup_logger
 from utils.error_handling import handle_async_errors, ConnectionError
 from utils.metrics import async_time_metric, opcua_connection_attempts, opcua_requests_total, opcua_request_duration, opcua_connection_status
 from config.settings import settings
@@ -48,7 +48,6 @@ class OpcUaClient(Singleton):
         # Mark as initialized
         self.initialized = True
         
-    @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Failed to connect to OPC-UA server")
     @async_time_metric("opcua_operation_duration", {"operation": "connect"})
     async def connect(self) -> bool:
@@ -111,7 +110,6 @@ class OpcUaClient(Singleton):
             
             return False
 
-    @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Error during OPC-UA disconnection")
     @async_time_metric("opcua_operation_duration", {"operation": "disconnect"})
     async def disconnect(self) -> bool:
@@ -155,7 +153,6 @@ class OpcUaClient(Singleton):
                 )
         return True
 
-    @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Error starting connection monitor")
     async def start_connection_monitor(self) -> bool:
         """Start a background task to monitor connection status
@@ -187,7 +184,6 @@ class OpcUaClient(Singleton):
         
         return success
 
-    @with_async_correlation_id
     @handle_async_errors(error_class=ConnectionError, default_message="Error stopping connection monitor")
     async def stop_connection_monitor(self) -> bool:
         """Stop the connection monitor task
@@ -258,7 +254,6 @@ class OpcUaClient(Singleton):
             await asyncio.sleep(5)
             await self.start_connection_monitor()
             
-    @with_async_correlation_id
     @handle_async_errors(default_message="Error getting node value")
     @async_time_metric("opcua_operation_duration", {"operation": "read_node"})
     async def get_value_of_specific_node(self, node_id: str) -> Optional[Dict[str, Any]]:

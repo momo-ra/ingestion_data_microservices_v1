@@ -1,15 +1,4 @@
-"""
-Singleton Base Class
-
-This module provides a base class for implementing the Singleton pattern.
-"""
-
 class Singleton:
-    """
-    A base class that implements the singleton pattern.
-    
-    Classes that inherit from this class will only have one instance.
-    """
     _instances = {}
     
     def __new__(cls, *args, **kwargs):

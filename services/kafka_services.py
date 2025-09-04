@@ -8,17 +8,19 @@ from datetime import datetime
 
 load_dotenv('.env', override=True)
 logger = setup_logger(__name__)
-print(os.getenv('KAFKA_BROKER'))
 
 class KafkaService:
     def __init__(self, kafka_broker:str):
-        self.producer = AIOKafkaProducer(
-            bootstrap_servers = kafka_broker
-        )
+        self.kafka_broker = kafka_broker
+        self.producer = None
         self.is_started = False
 
     async def start(self):
         if not self.is_started:
+            if self.producer is None:
+                self.producer = AIOKafkaProducer(
+                    bootstrap_servers=self.kafka_broker
+                )
             await self.producer.start()
             self.is_started = True
             logger.success("Kafka producer started")

@@ -40,22 +40,18 @@ services:
       - kafka-data:/var/lib/kafka/data
       - ./kafka:/etc/kafka/conf.d
       
-  postgres:
-    image: postgres:14
-    container_name: postgres
-    environment:
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_USER: postgres
-      POSTGRES_DB: opcua_data
+  redis:
+    image: redis:7-alpine
+    container_name: redis
     ports:
-      - "5432:5432"
+      - "6379:6379"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - redis-data:/data
       
   opcua_service:
     build: 
@@ -63,15 +59,30 @@ services:
       dockerfile: DockerFile
     container_name: opcua_service
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/opcua_data
+      # Central Database Configuration (External DB)
+      - DB_USER=postgres
+      - DB_PASSWORD=alpha
+      - DB_HOST=172.27.88.85
+      - DB_PORT=5432
+      - DB_NAME=central_database
+      
+      # Plant Database Configuration (External DB)
+      - PLANT_DATABASE_USER=postgres
+      - PLANT_DATABASE_PASSWORD=alpha
+      - PLANT_DATABASE_HOST=172.27.88.85
+      - PLANT_DATABASE_PORT=5432
+      - PLANT_DATABASE_NAME=plant_database
+      
+      # Other Services Configuration
       - KAFKA_BROKER=kafka:9092
-      - OPCUA_SERVER_URL=opc.tcp://opcua-server:4840
+      - OPC_UA_URL=opc.tcp://172.27.88.85:53530/OPCUA/SimulationServer
+      - JOBS_SERVICE_URL=http://localhost:8002
     ports:
       - "8007:8007"
     depends_on:
-      postgres:
-        condition: service_healthy
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
@@ -83,4 +94,4 @@ volumes:
   zookeeper-data:
   zookeeper-log:
   kafka-data:
-  postgres-data:
+  redis-data:

@@ -30,6 +30,7 @@ class MonitoringService:
         self.monitoring_task = None
         self.monitoring_running = False
         self.check_interval = 60  # seconds
+        self.default_plant_id = "1"  # Default to plant 1
         self.health_status = {
             "opc_ua_server": {
                 "status": "unknown",
@@ -160,37 +161,53 @@ class MonitoringService:
     async def _check_database_health(self):
         """Check database health"""
         try:
-            from database import check_db_connection
+            from database import check_db_health
             now = datetime.now()
             
-            is_healthy = await check_db_connection()
+            health_result = await check_db_health()
             
-            if is_healthy:
+            if health_result.get("central_db", False):
                 # Get additional database metrics
                 try:
-                    from sqlalchemy import text
-                    from database import async_session
+                    from sqlalchemy import text, func
+                    from database import get_central_db, get_plant_db
                     
                     metrics = {}
                     
-                    # Check connection count
-                    async with async_session() as session:
+                    # Check central database metrics
+                    async for session in get_central_db():
+                        # Check connection count
                         result = await session.execute(text("SELECT count(*) FROM pg_stat_activity"))
-                        metrics["active_connections"] = result.scalar()
+                        metrics["central_db_connections"] = result.scalar()
                         
                         # Check database size
                         result = await session.execute(text("SELECT pg_database_size(current_database())"))
-                        metrics["database_size_bytes"] = result.scalar()
+                        metrics["central_db_size_bytes"] = result.scalar()
                         
-                        # Check table counts
-                        result = await session.execute(text("SELECT count(*) FROM time_series"))
-                        metrics["time_series_count"] = result.scalar()
+                        # Check plants registry count
+                        result = await session.execute(text("SELECT count(*) FROM plants_registry WHERE is_active = true"))
+                        metrics["active_plants"] = result.scalar()
+                        break
+                    
+                    # Check plant database metrics
+                    try:
+                        async for session in get_plant_db(self.default_plant_id):
+                            # Check time series count
+                            result = await session.execute(text("SELECT count(*) FROM time_series"))
+                            metrics["time_series_count"] = result.scalar()
+                            
+                            # Check tag count
+                            result = await session.execute(text("SELECT count(*) FROM tags"))
+                            metrics["tag_count"] = result.scalar()
+                            
+                            # Check active polling tasks
+                            result = await session.execute(text("SELECT count(*) FROM polling_tasks WHERE is_active = true"))
+                            metrics["active_polling_tasks"] = result.scalar()
+                            break
+                    except Exception as plant_error:
+                        logger.warning(f"Error getting plant database metrics: {plant_error}")
+                        metrics["plant_db_error"] = str(plant_error)
                         
-                        result = await session.execute(text("SELECT count(*) FROM tag"))
-                        metrics["tag_count"] = result.scalar()
-                        
-                        result = await session.execute(text("SELECT count(*) FROM polling_tasks WHERE is_active = true"))
-                        metrics["active_polling_tasks"] = result.scalar()
                 except Exception as metrics_error:
                     logger.warning(f"Error getting database metrics: {metrics_error}")
                     metrics = {}
@@ -198,7 +215,7 @@ class MonitoringService:
                 self.health_status["database"] = {
                     "status": "healthy",
                     "last_check": now,
-                    "details": "Connected and responsive",
+                    "details": "Central and plant databases connected and responsive",
                     "metrics": metrics
                 }
                 logger.debug("Database is healthy")
@@ -206,8 +223,8 @@ class MonitoringService:
                 self.health_status["database"] = {
                     "status": "unhealthy",
                     "last_check": now,
-                    "details": "Not connected or not responsive",
-                    "metrics": {}
+                    "details": "Database connection issues detected",
+                    "metrics": health_result
                 }
                 logger.warning("Database is unhealthy")
         except Exception as e:
@@ -227,16 +244,14 @@ class MonitoringService:
             # Check if we have recent time series data
             try:
                 from sqlalchemy import text, func
-                from database import async_session
-                from models.models import TimeSeries
-                from sqlalchemy import select
+                from database import get_plant_db
                 
                 metrics = {}
                 
-                # Get the most recent timestamp
-                async with async_session() as session:
-                    query = select(func.max(TimeSeries.timestamp)).select_from(TimeSeries)
-                    result = await session.execute(query)
+                # Get the most recent timestamp from plant database
+                async for session in get_plant_db(self.default_plant_id):
+                    # Get latest timestamp
+                    result = await session.execute(text("SELECT MAX(timestamp) FROM time_series"))
                     latest_timestamp = result.scalar()
                     
                     if latest_timestamp:
@@ -247,8 +262,7 @@ class MonitoringService:
                         
                         # Get data points in the last hour
                         one_hour_ago = now - timedelta(hours=1)
-                        query = select(func.count()).select_from(TimeSeries).where(TimeSeries.timestamp >= one_hour_ago)
-                        result = await session.execute(query)
+                        result = await session.execute(text("SELECT count(*) FROM time_series WHERE timestamp >= :one_hour_ago"), {"one_hour_ago": one_hour_ago})
                         metrics["data_points_last_hour"] = result.scalar()
                         
                         # Determine status based on recency
@@ -265,6 +279,7 @@ class MonitoringService:
                         status = "unhealthy"
                         details = "No time series data available"
                         metrics = {}
+                    break
                 
                 self.health_status["time_series_data"] = {
                     "status": status,

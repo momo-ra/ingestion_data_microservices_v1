@@ -1,4 +1,11 @@
-from utils.log import setup_logger, with_async_correlation_id
+"""
+Subscription Services
+
+This module provides services for managing OPC UA subscriptions.
+Updated for multi-database architecture with plant-specific databases.
+"""
+
+from utils.log import setup_logger
 from utils.error_handling import handle_async_errors, SubscriptionError
 from utils.metrics import subscription_count
 from services.opc_ua_services import get_opc_ua_client
@@ -7,6 +14,8 @@ from queries.timeseries_queries import save_node_data_to_db
 from queries.subscription_queries import save_subscription_task, deactivate_subscription_task, get_active_subscription_tasks, get_or_create_tag_id
 from datetime import datetime
 from schemas.schema import TagSchema, TimeSeriesSchema
+from database import get_plant_db
+from utils.singleton import Singleton
 
 logger = setup_logger(__name__)
 
@@ -34,26 +43,34 @@ def get_subscription_service():
     """Get the singleton instance of SubscriptionService"""
     return SubscriptionService.get_instance()
 
-class SubscriptionService:
+class SubscriptionService(Singleton):
+    """Subscription service with database integration"""
+    
     @classmethod
     def get_instance(cls):
-        """Get or create the singleton instance of SubscriptionService"""
-        global _subscription_service_instance
-        if _subscription_service_instance is None:
-            _subscription_service_instance = cls()
-        return _subscription_service_instance
+        """Get the singleton instance"""
+        if not hasattr(cls, '_instance'):
+            cls._instance = cls()
+        return cls._instance
         
     def __init__(self):
         """Initialize the subscription service"""
-        # Get OPC UA client
+        # Avoid re-initialization if already initialized
+        if hasattr(self, 'initialized') and self.initialized:
+            return
+            
         self.opc_client = get_opc_ua_client()
-        
-        # Initialize subscription properties
         self.subscription = None
-        self.subscription_handles = {}
+        self.subscription_handles = {}  # Dictionary to store subscription handles
         self.handler = SubHandler(self)
         
-    @with_async_correlation_id
+        # Default plant and workspace for now - should be configurable
+        self.default_plant_id = "1"  # Default to plant 1
+        self.default_workspace_id = 1  # Default to workspace 1
+        
+        # Mark as initialized
+        self.initialized = True
+        
     @handle_async_errors(error_class=SubscriptionError, default_message="Error initializing subscription service")
     async def initialize(self):
         """Initialize the subscription service and restore subscriptions"""
@@ -76,14 +93,17 @@ class SubscriptionService:
             # Update metrics
             subscription_count.set(len(self.subscription_handles))
             
+            logger.info("Subscription service initialized successfully")
             return True
         except Exception as e:
             logger.error(f"Error initializing subscription service: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return False
+            raise SubscriptionError(
+                message=f"Failed to initialize subscription service: {e}",
+                error_code="INITIALIZATION_ERROR"
+            )
     
-    @with_async_correlation_id
     @handle_async_errors(error_class=SubscriptionError, default_message="Error cleaning up subscriptions")
     async def cleanup(self):
         """Clean up subscriptions"""
@@ -114,8 +134,11 @@ class SubscriptionService:
             logger.error(f"Error cleaning up subscriptions: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            raise SubscriptionError(
+                message=f"Failed to cleanup subscriptions: {e}",
+                error_code="CLEANUP_ERROR"
+            )
     
-    @with_async_correlation_id
     @handle_async_errors(error_class=SubscriptionError, default_message="Error creating subscription")
     async def create_subscription(self, node_id):
         """Create a subscription for a specific node
@@ -150,7 +173,9 @@ class SubscriptionService:
             self.subscription_handles[node_id] = handle
             
             # Save subscription to database
-            await save_subscription_task(node_id)
+            async for session in get_plant_db(self.default_plant_id):
+                await save_subscription_task(session, self.default_workspace_id, node_id, self.default_plant_id)
+                break  # Only use the first session
             
             # Update metrics
             subscription_count.set(len(self.subscription_handles))
@@ -168,7 +193,6 @@ class SubscriptionService:
                 details={"node_id": node_id}
             )
     
-    @with_async_correlation_id
     @handle_async_errors(error_class=SubscriptionError, default_message="Error removing subscription")
     async def remove_subscription(self, node_id):
         """Remove a subscription for a specific node
@@ -197,7 +221,9 @@ class SubscriptionService:
                 del self.subscription_handles[node_id]
                 
                 # Deactivate subscription in database
-                await deactivate_subscription_task(node_id)
+                async for session in get_plant_db(self.default_plant_id):
+                    await deactivate_subscription_task(session, self.default_workspace_id, node_id, self.default_plant_id)
+                    break  # Only use the first session
                 
                 # Update metrics
                 subscription_count.set(len(self.subscription_handles))
@@ -217,43 +243,46 @@ class SubscriptionService:
                 details={"node_id": node_id}
             )
     
-    @with_async_correlation_id
     @handle_async_errors(error_class=SubscriptionError, default_message="Error restoring subscriptions")
     async def restore_subscriptions(self):
         """Restore subscriptions from the database"""
         try:
             logger.info("Restoring subscriptions from database...")
             
-            # Get all active subscription tasks from database
-            tasks = await get_active_subscription_tasks()
-            
-            if not tasks:
-                logger.info("No active subscriptions found in database")
-                return
-            
-            # Restore each subscription
-            restored_count = 0
-            for task in tasks:
-                try:
-                    node_id = task['tag_name']
-                    
-                    # Skip if already subscribed
-                    if node_id in self.subscription_handles:
-                        logger.info(f"Already subscribed to node {node_id}, skipping")
-                        continue
-                    
-                    # Create subscription
-                    logger.info(f"Restoring subscription for node {node_id}")
-                    handle = await self.create_subscription(node_id)
-                    
-                    if handle:
-                        restored_count += 1
-                    else:
-                        logger.warning(f"Failed to restore subscription for node {node_id}")
-                except Exception as e:
-                    logger.error(f"Error restoring subscription for node {task['tag_name']}: {e}")
-            
-            logger.info(f"Restored {restored_count} subscriptions from database")
+            # Get database session for the default plant
+            async for session in get_plant_db(self.default_plant_id):
+                # Get all active subscription tasks from database
+                tasks = await get_active_subscription_tasks(session, self.default_workspace_id, self.default_plant_id)
+                
+                if not tasks:
+                    logger.info("No active subscriptions found in database")
+                    return
+                
+                # Restore each subscription
+                restored_count = 0
+                for task in tasks:
+                    try:
+                        node_id = task['tag_name']
+                        
+                        # Skip if already subscribed
+                        if node_id in self.subscription_handles:
+                            logger.info(f"Already subscribed to node {node_id}, skipping")
+                            continue
+                        
+                        # Create subscription
+                        logger.info(f"Restoring subscription for node {node_id}")
+                        handle = await self.create_subscription(node_id)
+                        
+                        if handle:
+                            restored_count += 1
+                        else:
+                            logger.warning(f"Failed to restore subscription for node {node_id}")
+                    except Exception as e:
+                        logger.error(f"Error restoring subscription for node {task['tag_name']}: {e}")
+                
+                logger.info(f"Restored {restored_count} subscriptions from database")
+                break  # Only use the first session
+                
         except Exception as e:
             logger.error(f"Error restoring subscriptions: {e}")
             import traceback
@@ -263,7 +292,6 @@ class SubscriptionService:
                 error_code="SUBSCRIPTION_RESTORE_ERROR"
             )
     
-    @with_async_correlation_id
     @handle_async_errors(error_class=SubscriptionError, default_message="Error processing data change")
     async def process_data_change(self, node, val, data):
         """Process data change from subscription
@@ -292,32 +320,36 @@ class SubscriptionService:
             # Get status code if available, otherwise set to None
             status = getattr(data, 'StatusCode', None)
             
-            # Get the tag_id from the database to ensure consistency
-            tag_id = await get_or_create_tag_id(node_id)
-            
-            node_data = {
-                "node_id": node_id,
-                "tag_id": tag_id,
-                "tag_name": node_id,
-                "value": val,
-                "timestamp": timestamp,
-                "status": str(status) if status else "Good"
-            }
-            
-            # Log the data
-            logger.info(f"Subscription data for node {node_id}: value={val}, timestamp={timestamp}")
-            
-            # Save to database with default frequency for subscriptions
-            frequency = "sub"  # Special marker for subscription data
-            success = await save_node_data_to_db(node_id, node_data, frequency)
-            
-            # Send to Kafka using the new helper method
-            await kafka_service.send_node_data("test", node_data)
-            
-            if success:
-                logger.info(f"Successfully saved subscription data for node {node_id} to database")
-            else:
-                logger.warning(f"Failed to save subscription data for node {node_id} to database")
+            # Get the tag_id and save data to database
+            async for session in get_plant_db(self.default_plant_id):
+                # Get the tag_id from the database to ensure consistency
+                tag_id = await get_or_create_tag_id(session, node_id, self.default_plant_id)
+                
+                node_data = {
+                    "node_id": node_id,
+                    "tag_id": tag_id,
+                    "tag_name": node_id,
+                    "value": val,
+                    "timestamp": timestamp,
+                    "status": str(status) if status else "Good"
+                }
+                
+                # Log the data
+                logger.info(f"Subscription data for node {node_id}: value={val}, timestamp={timestamp}")
+                
+                # Save to database with default frequency for subscriptions
+                frequency = "sub"  # Special marker for subscription data
+                success = await save_node_data_to_db(session, node_id, node_data, self.default_plant_id, frequency)
+                
+                # Send to Kafka using the new helper method
+                await kafka_service.send_node_data("test", node_data)
+                
+                if success:
+                    logger.info(f"Successfully saved subscription data for node {node_id} to database")
+                else:
+                    logger.warning(f"Failed to save subscription data for node {node_id} to database")
+                
+                break  # Only use the first session
             
             return True
         except Exception as e:
