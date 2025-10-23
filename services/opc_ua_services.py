@@ -9,7 +9,7 @@ from utils.metrics import async_time_metric, opcua_connection_attempts, opcua_re
 from config.settings import settings
 from utils.singleton import Singleton
 
-load_dotenv()
+load_dotenv("./../.env", override=True)
 logger = setup_logger(__name__)
 
 def get_opc_ua_client():

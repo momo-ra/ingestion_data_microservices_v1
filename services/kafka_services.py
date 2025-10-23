@@ -6,7 +6,7 @@ import json
 from schemas.schema import KafkaMessageSchema, TagSchema, TimeSeriesSchema
 from datetime import datetime
 
-load_dotenv('.env', override=True)
+load_dotenv('./../.env', override=True)
 logger = setup_logger(__name__)
 
 class KafkaService:

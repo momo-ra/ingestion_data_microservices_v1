@@ -11,7 +11,7 @@ from config.settings import settings
 
 logger = setup_logger(__name__)
 
-dotenv.load_dotenv('.env', override=True)
+dotenv.load_dotenv('./../.env', override=True)
 
 # Use JWT settings from config
 JWT_SECRET = settings.jwt.secret

@@ -1,10 +1,3 @@
-"""
-Application Configuration
-
-This module centralizes all configuration settings for the data ingestion microservice.
-It supports multi-database architecture with a central database and plant-specific databases.
-"""
-
 import os
 from typing import Dict, Any, Optional
 from pydantic import Field
@@ -13,7 +6,7 @@ from dotenv import load_dotenv
 import logging
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv("./../.env", override=True)
 
 logger = logging.getLogger(__name__)
 
